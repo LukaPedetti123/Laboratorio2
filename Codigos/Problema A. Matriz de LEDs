@@ -1,0 +1,632 @@
+
+; LABORATORIO 2 - PROBLEMA A
+; USART:
+; PD0 = RX
+; PD1 = TX
+
+; FILAS:
+; F0 = PD2
+; F1 = PD3
+; F2 = PD4
+; F3 = PD5
+; F4 = PD6
+; F5 = PD7
+; F6 = PB0
+; F7 = PB1
+;
+; COLUMNAS:
+; C0 = PB2
+; C1 = PB3
+; C2 = PB4
+; C3 = PB5
+; C4 = PC0
+; C5 = PC1
+; C6 = PC2
+; C7 = PC3
+;
+; USART MENÚ:
+; 1 = MENSAJE (Desplazamiento)
+; 2 = CORAZON
+; 3 = CARA
+; 4 = FLECHA
+;
+; Timer0 genera una interrupción cada 1 ms
+; para refrescar la matriz por multiplexado.
+;===========================================================
+
+.include "m328Pdef.inc"
+
+
+;===========================================================
+; REGISTROS
+;===========================================================
+
+.def TEMP    = r16
+.def TEMP2   = r17
+.def DATO    = r18
+.def CONT    = r19
+.def MASK    = r20
+.def POS     = r21
+
+
+;===========================================================
+; RAM
+;===========================================================
+
+.dseg
+
+BUFFER:
+    .byte 8
+
+ROW:
+    .byte 1
+
+TICK:
+    .byte 1
+
+MODO:
+    .byte 1
+
+
+;===========================================================
+; PROGRAMA
+;===========================================================
+
+.cseg
+
+.org 0x0000
+    rjmp INICIO
+
+
+;===========================================================
+; VECTOR TIMER0 COMPA
+;===========================================================
+
+.org OC0Aaddr
+    rjmp TIMER0_ISR
+
+
+INICIO:
+
+    ldi TEMP, LOW(RAMEND)
+    out SPL, TEMP
+
+    ldi TEMP, HIGH(RAMEND)
+    out SPH, TEMP
+
+    ; r1 siempre queda en cero
+    clr r1
+
+    ; PD2-PD7 como salida (PD0 y PD1 para USART)
+    ldi TEMP, 0b11111100
+    out DDRD, TEMP
+
+    ; PB0-PB5 como salida
+    ldi TEMP, 0b00111111
+    out DDRB, TEMP
+
+    ; PC0-PC3 como salida
+    ldi TEMP, 0b00001111
+    out DDRC, TEMP
+
+    ; Apagar salidas inicialmente
+    ldi TEMP, 0
+    out PORTB, TEMP
+    out PORTC, TEMP
+    out PORTD, TEMP
+
+    ldi TEMP, 0
+    sts BUFFER+0, TEMP
+    sts BUFFER+1, TEMP
+    sts BUFFER+2, TEMP
+    sts BUFFER+3, TEMP
+    sts BUFFER+4, TEMP
+    sts BUFFER+5, TEMP
+    sts BUFFER+6, TEMP
+    sts BUFFER+7, TEMP
+
+    ;-------------------------------------------------------
+    ; VARIABLES INICIALES
+    ;-------------------------------------------------------
+
+    sts ROW, TEMP
+    sts TICK, TEMP
+
+    ldi TEMP, 1
+    sts MODO, TEMP
+
+
+    ;-------------------------------------------------------
+    ; USART (16 MHz, 9600 baudios)
+    ;-------------------------------------------------------
+
+    ldi TEMP, 0
+    sts UBRR0H, TEMP
+
+    ldi TEMP, 103
+    sts UBRR0L, TEMP
+
+    ; RX y TX habilitados
+    ldi TEMP, (1<<RXEN0) | (1<<TXEN0)
+    sts UCSR0B, TEMP
+
+    ; 8 bits, 1 stop, sin paridad
+    ldi TEMP, (1<<UCSZ01) | (1<<UCSZ00)
+    sts UCSR0C, TEMP
+
+
+    ;-------------------------------------------------------
+    ; TIMER0 (CTC, Prescaler 64, Interrupción cada 1 ms)
+    ; 16 MHz / 64 = 250 kHz -> OCR0A = 249
+    ;-------------------------------------------------------
+
+    ldi TEMP, (1<<WGM01)
+    sts TCCR0A, TEMP
+
+    ldi TEMP, 249
+    sts OCR0A, TEMP
+
+    ldi TEMP, (1<<CS01) | (1<<CS00)
+    sts TCCR0B, TEMP
+
+    ; Habilitar interrupción Compare A
+    ldi TEMP, (1<<OCIE0A)
+    sts TIMSK0, TEMP
+
+    ; Activar interrupciones globales
+    sei
+
+
+    ;-------------------------------------------------------
+    ; ENVIAR MENU POR USART
+    ;-------------------------------------------------------
+
+    ldi ZH, HIGH(MENU*2)
+    ldi ZL, LOW(MENU*2)
+
+    rcall ENVIAR_TEXTO
+
+
+    ;-------------------------------------------------------
+    ; Mostrar mensaje inicialmente (Modo 1)
+    ;-------------------------------------------------------
+
+    ldi POS, 0
+    rcall ACTUALIZAR_PANTALLA
+
+
+;===========================================================
+; PROGRAMA PRINCIPAL
+;===========================================================
+
+MAIN:
+
+    ; Revisar recepción USART
+    rcall LEER_USART
+
+    tst DATO
+    breq SIN_DATO
+
+
+    ;-------------------------------------------------------
+    ; ¿RECIBIO 1? (MENSAJE SCROLL)
+    ;-------------------------------------------------------
+
+    cpi DATO, '1'
+    brne PROBAR_2
+
+    ldi TEMP, 1
+    sts MODO, TEMP
+    ldi POS, 0
+    rcall ACTUALIZAR_PANTALLA
+    rjmp MAIN
+
+
+PROBAR_2:
+
+    ;-------------------------------------------------------
+    ; ¿RECIBIO 2? (CORAZON)
+    ;-------------------------------------------------------
+
+    cpi DATO, '2'
+    brne PROBAR_3
+
+    ldi ZH, HIGH(CORAZON*2)
+    ldi ZL, LOW(CORAZON*2)
+    rcall CARGAR_FIGURA
+
+    ldi TEMP, 2
+    sts MODO, TEMP
+    rjmp MAIN
+
+
+PROBAR_3:
+
+    ;-------------------------------------------------------
+    ; ¿RECIBIO 3? (CARA)
+    ;-------------------------------------------------------
+
+    cpi DATO, '3'
+    brne PROBAR_4
+
+    ldi ZH, HIGH(CARA*2)
+    ldi ZL, LOW(CARA*2)
+    rcall CARGAR_FIGURA
+
+    ldi TEMP, 3
+    sts MODO, TEMP
+    rjmp MAIN
+
+
+PROBAR_4:
+
+    ;-------------------------------------------------------
+    ; ¿RECIBIO 4? (FLECHA)
+    ;-------------------------------------------------------
+
+    cpi DATO, '4'
+    brne SIN_DATO
+
+    ldi ZH, HIGH(FLECHA*2)
+    ldi ZL, LOW(FLECHA*2)
+    rcall CARGAR_FIGURA
+
+    ldi TEMP, 4
+    sts MODO, TEMP
+
+
+SIN_DATO:
+
+    ; Si no estamos en modo mensaje, continuar esperando
+    lds TEMP, MODO
+    cpi TEMP, 1
+    brne MAIN
+
+
+    ;-------------------------------------------------------
+    ; CONTROL DE VELOCIDAD DE SCROLL (aprox. 120 ms)
+    ;-------------------------------------------------------
+
+    lds TEMP, TICK
+    cpi TEMP, 120
+    brlo MAIN
+
+    ; Reiniciar contador de ticks
+    ldi TEMP, 0
+    sts TICK, TEMP
+
+
+    ;-------------------------------------------------------
+    ; Avanzar posición del mensaje
+    ;-------------------------------------------------------
+
+    inc POS
+    cpi POS, 77
+    brlo ACTUALIZAR
+
+    ldi POS, 0
+
+
+ACTUALIZAR:
+
+    rcall ACTUALIZAR_PANTALLA
+    rjmp MAIN
+
+
+;===========================================================
+; LEER USART
+; Devuelve DATO recibido o 0 si no hay nada
+;===========================================================
+
+LEER_USART:
+
+    ldi DATO, 0
+    lds TEMP, UCSR0A
+    sbrs TEMP, RXC0
+    ret
+    lds DATO, UDR0
+    ret
+
+
+;===========================================================
+; ENVIAR TEXTO (Z apunta al texto terminado en 0)
+;===========================================================
+
+ENVIAR_TEXTO:
+
+SIG_TEXTO:
+
+    lpm DATO, Z+
+    tst DATO
+    breq FIN_TEXTO
+    rcall ENVIAR_CHAR
+    rjmp SIG_TEXTO
+
+FIN_TEXTO:
+    ret
+
+
+;===========================================================
+; ENVIAR CARACTER POR USART
+;===========================================================
+
+ENVIAR_CHAR:
+
+ESPERAR_TX:
+
+    lds TEMP, UCSR0A
+    sbrs TEMP, UDRE0
+    rjmp ESPERAR_TX
+    sts UDR0, DATO
+    ret
+
+
+;===========================================================
+; CARGAR FIGURA (Z apunta a 8 bytes de filas)
+;===========================================================
+
+CARGAR_FIGURA:
+
+    ldi YH, HIGH(BUFFER)
+    ldi YL, LOW(BUFFER)
+    ldi CONT, 8
+
+COPIAR_FIGURA:
+
+    lpm DATO, Z+
+    st Y+, DATO
+    dec CONT
+    brne COPIAR_FIGURA
+    ret
+
+
+;===========================================================
+; ACTUALIZAR PANTALLA (Para el modo mensaje con scroll)
+;===========================================================
+
+ACTUALIZAR_PANTALLA:
+
+    mov r22, POS
+
+    ldi YH, HIGH(BUFFER)
+    ldi YL, LOW(BUFFER)
+
+    ldi r23, 0
+
+SIG_FILA:
+
+    ldi DATO, 0
+    ldi MASK, 1
+
+    ldi ZH, HIGH(MENSAJE*2)
+    ldi ZL, LOW(MENSAJE*2)
+
+    add ZL, r22
+    adc ZH, r1
+
+    ldi CONT, 8
+
+SIG_COLUMNA:
+
+    lpm TEMP, Z+
+
+    mov r24, TEMP
+    mov r25, r23
+
+DESPLAZAR_BIT:
+
+    tst r25
+    breq BIT_LISTO
+    lsr r24
+    dec r25
+    rjmp DESPLAZAR_BIT
+
+BIT_LISTO:
+
+    sbrc r24, 0
+    or DATO, MASK
+
+    lsl MASK
+    dec CONT
+    brne SIG_COLUMNA
+
+    st Y+, DATO
+
+    inc r23
+    cpi r23, 8
+    brlo SIG_FILA
+
+    ret
+
+
+;===========================================================
+; INTERRUPCION TIMER0 (Multiplexado de matriz cada 1 ms)
+;===========================================================
+
+TIMER0_ISR:
+
+    push TEMP
+    in TEMP, SREG
+    push TEMP
+
+    push TEMP2
+    push DATO
+    push CONT
+    push MASK
+
+
+    ; Aumentar TICK global
+    lds TEMP, TICK
+    inc TEMP
+    sts TICK, TEMP
+
+
+    ; Apagar todas las filas temporalmente
+    in TEMP, PORTD
+    andi TEMP, 0b00000011
+    out PORTD, TEMP
+
+    in TEMP, PORTB
+    andi TEMP, 0b11111100
+    out PORTB, TEMP
+
+
+    ; Obtener fila actual
+    lds TEMP, ROW
+
+    ldi ZH, HIGH(BUFFER)
+    ldi ZL, LOW(BUFFER)
+
+    add ZL, TEMP
+    adc ZH, r1
+
+    ld DATO, Z
+
+
+    ; Enviar columnas (bits 0-3 -> PB2-PB5, bits 4-7 -> PC0-PC3)
+    mov TEMP2, DATO
+    andi TEMP2, 0x0F
+    lsl TEMP2
+    lsl TEMP2
+
+    in TEMP, PORTB
+    andi TEMP, 0b11000011
+    or TEMP, TEMP2
+    out PORTB, TEMP
+
+    mov TEMP2, DATO
+    swap TEMP2
+    andi TEMP2, 0x0F
+
+    in TEMP, PORTC
+    andi TEMP, 0b11110000
+    or TEMP, TEMP2
+    out PORTC, TEMP
+
+
+    ; Activar la fila correspondiente
+    lds TEMP, ROW
+
+    cpi TEMP, 6
+    brlo FILA_PORTD
+
+    cpi TEMP, 6
+    breq FILA_PB0
+
+    ; Fila 7 en PB1
+    in TEMP, PORTB
+    ori TEMP, 0b00000010
+    out PORTB, TEMP
+    rjmp SIGUIENTE_FILA
+
+FILA_PB0:
+    in TEMP, PORTB
+    ori TEMP, 0b00000001
+    out PORTB, TEMP
+    rjmp SIGUIENTE_FILA
+
+FILA_PORTD:
+    ldi MASK, 0b00000100
+
+CALCULAR_MASCARA:
+    tst TEMP
+    breq MASCARA_LISTA
+    lsl MASK
+    dec TEMP
+    rjmp CALCULAR_MASCARA
+
+MASCARA_LISTA:
+    in TEMP, PORTD
+    or TEMP, MASK
+    out PORTD, TEMP
+
+
+SIGUIENTE_FILA:
+
+    lds TEMP, ROW
+    inc TEMP
+    cpi TEMP, 8
+    brlo GUARDAR_ROW
+
+    ldi TEMP, 0
+
+GUARDAR_ROW:
+    sts ROW, TEMP
+
+
+    pop MASK
+    pop CONT
+    pop DATO
+    pop TEMP2
+    pop TEMP
+    out SREG, TEMP
+    pop TEMP
+
+    reti
+
+
+;===========================================================
+; TABLAS EN MEMORIA FLASH
+;===========================================================
+
+.align 2
+MENU:
+    .db 13,10
+    .db "====================",13,10
+    .db " LABORATORIO 2",13,10
+    .db " MATRIZ 8X8",13,10
+    .db "====================",13,10
+    .db "1 - MENSAJE",13,10
+    .db "2 - CORAZON",13,10
+    .db "3 - CARA",13,10
+    .db "4 - FLECHA",13,10
+    .db "Seleccione una opcion: ",0,0   ; Doble 0 al final si es necesario para paridad
+
+
+.align 2
+MENSAJE:
+    ; H
+    .db 0x7F, 0x08, 0x08, 0x08, 0x7F, 0x00
+    ; O
+    .db 0x3E, 0x41, 0x41, 0x41, 0x3E, 0x00
+    ; L
+    .db 0x7F, 0x40, 0x40, 0x40, 0x40, 0x00
+    ; A
+    .db 0x7E, 0x09, 0x09, 0x09, 0x7E, 0x00
+    ; Espacio
+    .db 0x00, 0x00
+    ; U
+    .db 0x3F, 0x40, 0x40, 0x40, 0x3F, 0x00
+    ; T
+    .db 0x01, 0x01, 0x7F, 0x01, 0x01, 0x00
+    ; E
+    .db 0x7F, 0x49, 0x49, 0x49, 0x41, 0x00
+    ; C
+    .db 0x3E, 0x41, 0x41, 0x41, 0x22, 0x00
+    ; Espacio
+    .db 0x00, 0x00
+    ; 2
+    .db 0x46, 0x49, 0x49, 0x49, 0x31, 0x00
+    ; 0
+    .db 0x3E, 0x41, 0x41, 0x41, 0x3E, 0x00
+    ; 2
+    .db 0x46, 0x49, 0x49, 0x49, 0x31, 0x00
+    ; 6
+    .db 0x3E, 0x49, 0x49, 0x49, 0x26, 0x00
+    ; Columnas vacías finales para salida suave
+    .db 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+
+
+.align 2
+CORAZON:
+    .db 0x00, 0x66, 0xFF, 0xFF, 0x7E, 0x3C, 0x18, 0x00
+
+
+.align 2
+CARA:
+    .db 0x3C, 0x42, 0xA5, 0x81, 0xA5, 0x99, 0x42, 0x3C
+
+
+.align 2
+FLECHA:
+    .db 0x08, 0x0C, 0xFE, 0xFF, 0xFE, 0x0C, 0x08, 0x00
