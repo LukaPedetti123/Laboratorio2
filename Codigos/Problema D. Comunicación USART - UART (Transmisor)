@@ -1,0 +1,124 @@
+;
+; PROBLEMA D - COMUNICACION USART
+; - TRANSMISOR
+
+.include "m328Pdef.inc"
+
+
+.org 0x0000
+    rjmp RESET
+
+
+
+RESET:
+
+    ldi r16, high(RAMEND)
+    out SPH, r16
+
+    ldi r16, low(RAMEND)
+    out SPL, r16
+
+
+    ; PD2, PD3 y PD4 como entradas
+    cbi DDRD, PD2
+    cbi DDRD, PD3
+    cbi DDRD, PD4
+
+    ; Activar pull-up interno
+    sbi PORTD, PD2
+    sbi PORTD, PD3
+    sbi PORTD, PD4
+
+    ldi r16, high(103)
+    sts UBRR0H, r16
+
+    ldi r16, low(103)
+    sts UBRR0L, r16
+
+    ldi r16, (1<<TXEN0)
+    sts UCSR0B, r16
+
+    ldi r16, (1<<UCSZ01) | (1<<UCSZ00)
+    sts UCSR0C, r16
+
+
+    sbi DDRD, PD1
+
+
+MAIN:
+
+    ; Leer PORTD
+    in r16, PIND
+
+ 
+    ; Comenzar con valor 0
+    ldi r17, 0
+
+
+    ; Revisar PD2
+    sbrc r16, PD2
+    rjmp BIT0_NO_PULSADO
+
+    ; PD2 pulsado
+    ori r17, 0b001
+
+BIT0_NO_PULSADO:
+
+
+    sbrc r16, PD3
+    rjmp BIT1_NO_PULSADO
+
+    ; PD3 pulsado
+    ori r17, 0b010
+
+BIT1_NO_PULSADO:
+
+
+    sbrc r16, PD4
+    rjmp BIT2_NO_PULSADO
+
+    ; PD4 pulsado
+    ori r17, 0b100
+
+BIT2_NO_PULSADO:
+
+    rcall USART_TRANSMITIR
+
+    rcall ESPERA
+
+    rjmp MAIN
+
+
+USART_TRANSMITIR:
+
+
+ESPERAR_UDRE:
+
+    lds r18, UCSR0A
+
+    sbrs r18, UDRE0
+    rjmp ESPERAR_UDRE
+
+
+    ; Enviar el valor
+    sts UDR0, r17
+
+    ret
+
+ESPERA:
+
+    ldi r18, 50
+
+ESPERA1:
+
+    ldi r19, 255
+
+ESPERA2:
+
+    dec r19
+    brne ESPERA2
+
+    dec r18
+    brne ESPERA1
+
+    ret
