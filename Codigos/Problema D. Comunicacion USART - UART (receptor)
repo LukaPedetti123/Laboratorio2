@@ -1,11 +1,9 @@
-;
 ; PROBLEMA D - COMUNICACION USART
 ; ATmega328P - RECEPTOR
 ;
 ; PD0 / RX <- TX del primer ATmega
 ;
 ; LEDs:
-;
 ; PB0 -> LED 0
 ; PB1 -> LED 1
 ; PB2 -> LED 2
@@ -21,14 +19,12 @@
 
 .include "m328Pdef.inc"
 
-
 ;---------------------------------------
 ; INICIO
 ;---------------------------------------
 
 .org 0x0000
     rjmp RESET
-
 
 ;---------------------------------------
 ; RESET
@@ -43,7 +39,6 @@ RESET:
     ldi r16, low(RAMEND)
     out SPL, r16
 
-
     ;-----------------------------------
     ; CONFIGURAR LEDs
     ;-----------------------------------
@@ -56,12 +51,10 @@ RESET:
     ldi r16, 0b00000011
     out DDRC, r16
 
-
     ; Apagar todos los LEDs
     ldi r16, 0
     out PORTB, r16
     out PORTC, r16
-
 
     ;-----------------------------------
     ; CONFIGURAR USART
@@ -77,16 +70,13 @@ RESET:
     ldi r16, low(103)
     sts UBRR0L, r16
 
-
     ; Habilitar receptor
     ldi r16, (1<<RXEN0)
     sts UCSR0B, r16
 
-
-    ; 8 bits, 1 stop, sin paridad
-    ldi r16, (1<<UCSZ01) | (1<<UCSZ00)
+    ; 8 bits, 1 stop, sin paridad (0b000006 en hex/bin para evitar error de operador en AVRASM2)
+    ldi r16, (1<<UCSZ01) + (1<<UCSZ00)
     sts UCSR0C, r16
-
 
 ;---------------------------------------
 ; PROGRAMA PRINCIPAL
@@ -97,27 +87,23 @@ MAIN:
     ; Esperar un dato
     rcall USART_RECIBIR
 
-
-    ; El dato recibido queda en r17
-    ;
-    ; Debe estar entre 0 y 7.
-
-
-    ;-----------------------------------
-    ; Apagar todos los LEDs
-    ;-----------------------------------
-
+    ; Apagar todos los LEDs antes de encender el correspondiente
     ldi r16, 0
     out PORTB, r16
-
-    ldi r16, 0
     out PORTC, r16
 
-
     ;-----------------------------------
-    ; Decodificar valor
+    ; Decodificar valor (soporta valor binario 0-7 o ASCII '0'-'7')
     ;-----------------------------------
 
+    ; Si el dato está en ASCII (ej. '0' = 48), le restamos '0'
+    cpi r17, '0'
+    brlo COMPROBAR_BINARIO
+    cpi r17, '7'+1
+    brsh COMPROBAR_BINARIO
+    subi r17, '0'
+
+COMPROBAR_BINARIO:
     cpi r17, 0
     breq LED0
 
@@ -142,128 +128,63 @@ MAIN:
     cpi r17, 7
     breq LED7
 
-
-    ; Si llegó algo diferente de 0-7
+    ; Si llegó un dato fuera de rango (no es 0-7), reiniciar ciclo
     rjmp MAIN
 
-
 ;---------------------------------------
-; LED 0
+; RUTINAS LEDs
 ;---------------------------------------
 
 LED0:
-
     ldi r16, 0b00000001
     out PORTB, r16
-
     rjmp MAIN
-
-
-;---------------------------------------
-; LED 1
-;---------------------------------------
 
 LED1:
-
     ldi r16, 0b00000010
     out PORTB, r16
-
     rjmp MAIN
-
-
-;---------------------------------------
-; LED 2
-;---------------------------------------
 
 LED2:
-
     ldi r16, 0b00000100
     out PORTB, r16
-
     rjmp MAIN
-
-
-;---------------------------------------
-; LED 3
-;---------------------------------------
 
 LED3:
-
     ldi r16, 0b00001000
     out PORTB, r16
-
     rjmp MAIN
-
-
-;---------------------------------------
-; LED 4
-;---------------------------------------
 
 LED4:
-
     ldi r16, 0b00010000
     out PORTB, r16
-
     rjmp MAIN
-
-
-;---------------------------------------
-; LED 5
-;---------------------------------------
 
 LED5:
-
     ldi r16, 0b00100000
     out PORTB, r16
-
     rjmp MAIN
-
-
-;---------------------------------------
-; LED 6
-;---------------------------------------
 
 LED6:
-
     ldi r16, 0b00000001
     out PORTC, r16
-
     rjmp MAIN
-
-
-;---------------------------------------
-; LED 7
-;---------------------------------------
 
 LED7:
-
     ldi r16, 0b00000010
     out PORTC, r16
-
     rjmp MAIN
-
 
 ;---------------------------------------
 ; USART_RECIBIR
-;
-; Espera hasta recibir un dato.
-;
-; Salida:
-;   r17 = dato recibido
 ;---------------------------------------
 
 USART_RECIBIR:
 
 ESPERAR_DATO:
-
     lds r18, UCSR0A
-
-    ; Revisar RXC0
     sbrs r18, RXC0
     rjmp ESPERAR_DATO
 
-
-    ; Leer dato recibido
     lds r17, UDR0
-
-    ret|
+    ret
