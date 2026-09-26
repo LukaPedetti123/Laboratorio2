@@ -1,1 +1,973 @@
 
+; PROBLEMA C - PLOTTER 
+
+; USART:
+;   1 -> Triangulo
+;   2 -> Circulo
+;   3 -> Pentagrama
+;   4 -> Figura libre
+;   P -> Oddish
+;   T -> Todas las figuras
+
+; D2 -> X0 -> Bajar herramienta
+; D3 -> X1 -> Subir herramienta
+; D4 -> X5 -> Movimiento abajo
+; D5 -> X6 -> Movimiento arriba
+; D6 -> X7 -> Movimiento izquierda
+; D7 -> X10 -> Movimiento derecha
+
+.include "m328pdef.inc"
+
+.def TEMP  = r16
+.def DATO  = r17
+.def CONT1 = r18
+.def CONT2 = r19
+.def CONT3 = r20
+
+
+
+.equ TIEMPO_CORTO = 15
+.equ TIEMPO_MEDIO = 30
+.equ TIEMPO_LARGO = 45
+
+; Movimiento inicial mas corto
+; NO modifica el tamaño de las figuras
+.equ TIEMPO_CENTRO = 7
+
+.cseg
+.org 0x0000
+
+    rjmp INICIO
+
+INICIO:
+
+    ldi TEMP, high(RAMEND)
+    out SPH, TEMP
+
+    ldi TEMP, low(RAMEND)
+    out SPL, TEMP
+
+
+    ; --------------------------------------------------------
+    ; Configurar PORTD
+    ;
+    ; PD0 = RX -> entrada
+    ; PD1 = TX -> salida
+    ; PD2 = Bajar
+    ; PD3 = Subir
+    ; PD4 = Abajo
+    ; PD5 = Arriba
+    ; PD6 = Izquierda
+    ; PD7 = Derecha
+    ; --------------------------------------------------------
+
+    ldi TEMP, 0b11111110
+    out DDRD, TEMP
+
+    ; Todas las salidas inicialmente apagadas
+
+    ldi TEMP, 0x00
+    out PORTD, TEMP
+
+
+    ; --------------------------------------------------------
+    ; Configurar USART
+    ; --------------------------------------------------------
+
+    ; UBRR0 = 103 -> 9600 baudios a 16 MHz
+
+    ldi TEMP, 0
+    sts UBRR0H, TEMP
+
+    ldi TEMP, 103
+    sts UBRR0L, TEMP
+
+
+    ; Habilitar RX y TX
+
+    ldi TEMP, (1<<RXEN0)|(1<<TXEN0)
+    sts UCSR0B, TEMP
+
+
+    ; 8 bits, 1 stop, sin paridad
+
+    ldi TEMP, (1<<UCSZ01)|(1<<UCSZ00)
+    sts UCSR0C, TEMP
+
+
+    ; --------------------------------------------------------
+    ; Estado inicial
+    ; --------------------------------------------------------
+
+    rcall SUBIR
+
+    ; Llevar el plotter a una posicion inicial
+    ; cercana al centro.
+    ;
+    ; Ahora el movimiento hacia la izquierda
+    ; es mucho mas corto.
+
+    rcall CENTRAR_PLOTTER
+
+
+; ============================================================
+; PROGRAMA PRINCIPAL
+; ============================================================
+
+MAIN:
+
+    rcall USART_RECIBIR
+
+    ; --------------------------------------------------------
+    ; Comando 1 -> TRIANGULO
+    ; --------------------------------------------------------
+
+    cpi TEMP, '1'
+    brne COMANDO_2
+
+    rcall POSICION_TRIANGULO
+    rcall DIBUJAR_TRIANGULO
+    rjmp FIN_DIBUJO
+
+
+COMANDO_2:
+
+    ; --------------------------------------------------------
+    ; Comando 2 -> CIRCULO
+    ; --------------------------------------------------------
+
+    cpi TEMP, '2'
+    brne COMANDO_3
+
+    rcall POSICION_CIRCULO
+    rcall DIBUJAR_CIRCULO
+    rjmp FIN_DIBUJO
+
+
+COMANDO_3:
+
+    ; --------------------------------------------------------
+    ; Comando 3 -> PENTAGRAMA
+    ; --------------------------------------------------------
+
+    cpi TEMP, '3'
+    brne COMANDO_4
+
+    rcall POSICION_PENTAGRAMA
+    rcall DIBUJAR_PENTAGRAMA
+    rjmp FIN_DIBUJO
+
+
+COMANDO_4:
+
+    ; --------------------------------------------------------
+    ; Comando 4 -> FIGURA LIBRE
+    ; --------------------------------------------------------
+
+    cpi TEMP, '4'
+    brne COMANDO_P
+
+    rcall POSICION_LIBRE
+    rcall DIBUJAR_LIBRE
+    rjmp FIN_DIBUJO
+
+
+COMANDO_P:
+
+    ; --------------------------------------------------------
+    ; Comando P -> ODDISH
+    ; --------------------------------------------------------
+
+    cpi TEMP, 'P'
+    breq HACER_ODDISH
+
+    cpi TEMP, 'p'
+    brne COMANDO_T
+
+
+HACER_ODDISH:
+
+    rcall POSICION_ODDISH
+    rcall DIBUJAR_ODDISH
+    rjmp FIN_DIBUJO
+
+
+COMANDO_T:
+
+    ; --------------------------------------------------------
+    ; Comando T -> TODAS LAS FIGURAS
+    ; --------------------------------------------------------
+
+    cpi TEMP, 'T'
+    breq HACER_TODAS
+
+    cpi TEMP, 't'
+    brne MAIN
+
+
+HACER_TODAS:
+
+    rcall TODAS
+    rjmp MAIN
+
+
+; ============================================================
+; RECIBIR USART
+; ============================================================
+
+USART_RECIBIR:
+
+ESPERAR_RX:
+
+    lds TEMP, UCSR0A
+
+    sbrs TEMP, RXC0
+    rjmp ESPERAR_RX
+
+    lds TEMP, UDR0
+
+    ret
+
+
+; ============================================================
+; POSICIONES DE LAS FIGURAS
+; ============================================================
+
+; ------------------------------------------------------------
+; POSICION TRIANGULO
+; ------------------------------------------------------------
+
+POSICION_TRIANGULO:
+
+    rcall SUBIR
+    rcall MOV_IZQUIERDA_MEDIO
+
+    ret
+
+
+; ------------------------------------------------------------
+; POSICION CIRCULO
+; ------------------------------------------------------------
+
+POSICION_CIRCULO:
+
+    rcall SUBIR
+    rcall MOV_DERECHA_MEDIO
+
+    ret
+
+
+; ------------------------------------------------------------
+; POSICION PENTAGRAMA
+; ------------------------------------------------------------
+
+POSICION_PENTAGRAMA:
+
+    rcall MOV_ABAJO_CORTO
+    rcall MOV_IZQUIERDA_MEDIO
+
+    ret
+
+
+; ------------------------------------------------------------
+; POSICION FIGURA LIBRE
+; ------------------------------------------------------------
+
+POSICION_LIBRE:
+
+    rcall MOV_ABAJO_MEDIO
+
+    ret
+
+
+; ------------------------------------------------------------
+; POSICION ODDISH
+; ------------------------------------------------------------
+
+POSICION_ODDISH:
+
+    rcall MOV_ABAJO_CORTO
+    rcall MOV_DERECHA_MEDIO
+
+    ret
+
+
+; ============================================================
+; CENTRAR / POSICION INICIAL
+; ============================================================
+
+CENTRAR_PLOTTER:
+
+    ; Asegurar herramienta arriba
+
+    rcall SUBIR
+
+    ; Movimiento MUY corto hacia la izquierda
+    ; exclusivo para posicion inicial
+
+    rcall MOV_IZQUIERDA_CENTRO
+
+    ; Pequeño movimiento hacia abajo
+
+    rcall MOV_ABAJO_CORTO
+
+    ret
+
+
+; ============================================================
+; MOVIMIENTO INICIAL CORTO ESPECIAL
+; ============================================================
+
+MOV_IZQUIERDA_CENTRO:
+
+    sbi PORTD, PD6
+
+    rcall ESPERA_CENTRO
+
+    cbi PORTD, PD6
+
+    rcall ESPERA_PAUSA
+
+    ret
+
+
+; ============================================================
+; DIBUJAR TRIANGULO
+; ============================================================
+
+DIBUJAR_TRIANGULO:
+
+    rcall BAJAR
+
+    ; Lado 1
+
+    rcall MOV_DERECHA_CORTO
+    rcall MOV_ABAJO_CORTO
+
+    ; Lado 2
+
+    rcall MOV_IZQUIERDA_CORTO
+    rcall MOV_ABAJO_CORTO
+
+    ; Lado 3
+
+    rcall MOV_DERECHA_CORTO
+    rcall MOV_ARRIBA_CORTO
+
+    rcall MOV_IZQUIERDA_CORTO
+
+    ret
+
+
+; ============================================================
+; DIBUJAR CIRCULO
+; ============================================================
+
+DIBUJAR_CIRCULO:
+
+    rcall BAJAR
+
+    ; Aproximacion circular usando varios movimientos
+
+    rcall MOV_DERECHA_CORTO
+    rcall MOV_DERECHA_CORTO
+
+    rcall MOV_ABAJO_CORTO
+
+    rcall MOV_DERECHA_CORTO
+
+    rcall MOV_ABAJO_CORTO
+    rcall MOV_ABAJO_CORTO
+
+    rcall MOV_IZQUIERDA_CORTO
+    rcall MOV_IZQUIERDA_CORTO
+
+    rcall MOV_ARRIBA_CORTO
+
+    rcall MOV_IZQUIERDA_CORTO
+
+    rcall MOV_ARRIBA_CORTO
+    rcall MOV_ARRIBA_CORTO
+
+    rcall MOV_DERECHA_CORTO
+
+    ret
+
+
+; ============================================================
+; DIBUJAR PENTAGRAMA
+; ============================================================
+
+DIBUJAR_PENTAGRAMA:
+
+    rcall BAJAR
+
+    ; Punta 1
+
+    rcall MOV_DERECHA_CORTO
+    rcall MOV_ABAJO_CORTO
+
+    ; Punta 2
+
+    rcall MOV_IZQUIERDA_CORTO
+    rcall MOV_ABAJO_CORTO
+
+    ; Punta 3
+
+    rcall MOV_DERECHA_CORTO
+    rcall MOV_IZQUIERDA_CORTO
+
+    ; Punta 4
+
+    rcall MOV_DERECHA_CORTO
+    rcall MOV_ABAJO_CORTO
+
+    ; Punta 5
+
+    rcall MOV_IZQUIERDA_CORTO
+    rcall MOV_ABAJO_CORTO
+
+    ; Cerrar figura
+
+    rcall MOV_IZQUIERDA_CORTO
+    rcall MOV_ARRIBA_CORTO
+
+    rcall MOV_DERECHA_CORTO
+    rcall MOV_ARRIBA_CORTO
+
+    ret
+
+
+; ============================================================
+; DIBUJAR FIGURA LIBRE
+; ============================================================
+
+DIBUJAR_LIBRE:
+
+    rcall BAJAR
+
+    ; Figura sencilla tipo casa
+
+    ; Base
+
+    rcall MOV_DERECHA_CORTO
+    rcall MOV_DERECHA_CORTO
+
+    ; Pared derecha
+
+    rcall MOV_ARRIBA_CORTO
+    rcall MOV_ARRIBA_CORTO
+
+    ; Techo
+
+    rcall MOV_IZQUIERDA_CORTO
+    rcall MOV_ARRIBA_CORTO
+
+    rcall MOV_IZQUIERDA_CORTO
+    rcall MOV_ABAJO_CORTO
+
+    ; Pared izquierda
+
+    rcall MOV_ABAJO_CORTO
+    rcall MOV_ABAJO_CORTO
+
+    ret
+
+
+; ============================================================
+; DIBUJAR ODDISH
+; ============================================================
+
+DIBUJAR_ODDISH:
+
+    rcall BAJAR
+
+    ; Cuerpo
+
+    rcall MOV_DERECHA_CORTO
+    rcall MOV_DERECHA_CORTO
+
+    rcall MOV_ABAJO_CORTO
+    rcall MOV_ABAJO_CORTO
+
+    rcall MOV_IZQUIERDA_CORTO
+    rcall MOV_IZQUIERDA_CORTO
+
+    rcall MOV_ARRIBA_CORTO
+    rcall MOV_ARRIBA_CORTO
+
+    ; Hoja izquierda
+
+    rcall MOV_IZQUIERDA_CORTO
+    rcall MOV_ARRIBA_CORTO
+
+    rcall MOV_DERECHA_CORTO
+    rcall MOV_ARRIBA_CORTO
+
+    ; Hoja derecha
+
+    rcall MOV_DERECHA_CORTO
+    rcall MOV_ARRIBA_CORTO
+
+    rcall MOV_IZQUIERDA_CORTO
+    rcall MOV_ARRIBA_CORTO
+
+    ret
+
+
+; ============================================================
+; TODAS LAS FIGURAS
+; ============================================================
+
+TODAS:
+
+    ; --------------------------------------------------------
+    ; TRIANGULO
+    ; --------------------------------------------------------
+
+    rcall POSICION_TRIANGULO
+    rcall DIBUJAR_TRIANGULO
+    rcall SUBIR
+
+    ; Regresar aproximadamente al centro
+
+    rcall MOV_DERECHA_MEDIO
+    rcall MOV_ABAJO_CORTO
+
+
+    ; --------------------------------------------------------
+    ; CIRCULO
+    ; --------------------------------------------------------
+
+    rcall POSICION_CIRCULO
+    rcall DIBUJAR_CIRCULO
+    rcall SUBIR
+
+    ; Regresar aproximadamente al centro
+
+    rcall MOV_IZQUIERDA_MEDIO
+    rcall MOV_ABAJO_CORTO
+
+
+    ; --------------------------------------------------------
+    ; PENTAGRAMA
+    ; --------------------------------------------------------
+
+    rcall POSICION_PENTAGRAMA
+    rcall DIBUJAR_PENTAGRAMA
+    rcall SUBIR
+
+    ; Regresar aproximadamente al centro
+
+    rcall MOV_DERECHA_MEDIO
+    rcall MOV_ARRIBA_CORTO
+
+
+    ; --------------------------------------------------------
+    ; ODDISH
+    ; --------------------------------------------------------
+
+    rcall POSICION_ODDISH
+    rcall DIBUJAR_ODDISH
+    rcall SUBIR
+
+    ; Regresar aproximadamente al centro
+
+    rcall MOV_IZQUIERDA_MEDIO
+    rcall MOV_ARRIBA_CORTO
+
+
+    ; --------------------------------------------------------
+    ; FIGURA LIBRE
+    ; --------------------------------------------------------
+
+    rcall POSICION_LIBRE
+    rcall DIBUJAR_LIBRE
+    rcall SUBIR
+
+    rcall MOV_ARRIBA_MEDIO
+
+    ret
+
+
+; ============================================================
+; FIN DE DIBUJO
+; ============================================================
+
+FIN_DIBUJO:
+
+    ; Siempre dejar herramienta arriba
+
+    rcall SUBIR
+
+    ; Apagar movimientos
+
+    cbi PORTD, PD4
+    cbi PORTD, PD5
+    cbi PORTD, PD6
+    cbi PORTD, PD7
+
+    rjmp MAIN
+
+
+; ============================================================
+; MOVIMIENTO ABAJO - CORTO
+; ============================================================
+
+MOV_ABAJO_CORTO:
+
+    sbi PORTD, PD4
+    rcall ESPERA_CORTA
+    cbi PORTD, PD4
+    rcall ESPERA_PAUSA
+
+    ret
+
+
+; ============================================================
+; MOVIMIENTO ABAJO - MEDIO
+; ============================================================
+
+MOV_ABAJO_MEDIO:
+
+    sbi PORTD, PD4
+    rcall ESPERA_MEDIO
+    cbi PORTD, PD4
+    rcall ESPERA_PAUSA
+
+    ret
+
+
+; ============================================================
+; MOVIMIENTO ABAJO - LARGO
+; ============================================================
+
+MOV_ABAJO_LARGO:
+
+    sbi PORTD, PD4
+    rcall ESPERA_LARGO
+    cbi PORTD, PD4
+    rcall ESPERA_PAUSA
+
+    ret
+
+
+; ============================================================
+; MOVIMIENTO ARRIBA - CORTO
+; ============================================================
+
+MOV_ARRIBA_CORTO:
+
+    sbi PORTD, PD5
+    rcall ESPERA_CORTA
+    cbi PORTD, PD5
+    rcall ESPERA_PAUSA
+
+    ret
+
+
+; ============================================================
+; MOVIMIENTO ARRIBA - MEDIO
+; ============================================================
+
+MOV_ARRIBA_MEDIO:
+
+    sbi PORTD, PD5
+    rcall ESPERA_MEDIO
+    cbi PORTD, PD5
+    rcall ESPERA_PAUSA
+
+    ret
+
+
+; ============================================================
+; MOVIMIENTO ARRIBA - LARGO
+; ============================================================
+
+MOV_ARRIBA_LARGO:
+
+    sbi PORTD, PD5
+    rcall ESPERA_LARGO
+    cbi PORTD, PD5
+    rcall ESPERA_PAUSA
+
+    ret
+
+
+; ============================================================
+; MOVIMIENTO IZQUIERDA - CORTO
+; ============================================================
+
+MOV_IZQUIERDA_CORTO:
+
+    sbi PORTD, PD6
+    rcall ESPERA_CORTA
+    cbi PORTD, PD6
+    rcall ESPERA_PAUSA
+
+    ret
+
+
+; ============================================================
+; MOVIMIENTO IZQUIERDA - MEDIO
+; ============================================================
+
+MOV_IZQUIERDA_MEDIO:
+
+    sbi PORTD, PD6
+    rcall ESPERA_MEDIO
+    cbi PORTD, PD6
+    rcall ESPERA_PAUSA
+
+    ret
+
+
+; ============================================================
+; MOVIMIENTO IZQUIERDA - LARGO
+; ============================================================
+
+MOV_IZQUIERDA_LARGO:
+
+    sbi PORTD, PD6
+    rcall ESPERA_LARGO
+    cbi PORTD, PD6
+    rcall ESPERA_PAUSA
+
+    ret
+
+
+; ============================================================
+; MOVIMIENTO DERECHA - CORTO
+; ============================================================
+
+MOV_DERECHA_CORTO:
+
+    sbi PORTD, PD7
+    rcall ESPERA_CORTA
+    cbi PORTD, PD7
+    rcall ESPERA_PAUSA
+
+    ret
+
+
+; ============================================================
+; MOVIMIENTO DERECHA - MEDIO
+; ============================================================
+
+MOV_DERECHA_MEDIO:
+
+    sbi PORTD, PD7
+    rcall ESPERA_MEDIO
+    cbi PORTD, PD7
+    rcall ESPERA_PAUSA
+
+    ret
+
+
+; ============================================================
+; MOVIMIENTO DERECHA - LARGO
+; ============================================================
+
+MOV_DERECHA_LARGO:
+
+    sbi PORTD, PD7
+    rcall ESPERA_LARGO
+    cbi PORTD, PD7
+    rcall ESPERA_PAUSA
+
+    ret
+
+
+; ============================================================
+; BAJAR HERRAMIENTA
+; ============================================================
+
+BAJAR:
+
+    sbi PORTD, PD2
+
+    rcall ESPERA_BAJAR
+
+    cbi PORTD, PD2
+
+    rcall ESPERA_PAUSA
+
+    ret
+
+
+; ============================================================
+; SUBIR HERRAMIENTA
+; ============================================================
+
+SUBIR:
+
+    sbi PORTD, PD3
+
+    rcall ESPERA_SUBIR
+
+    cbi PORTD, PD3
+
+    rcall ESPERA_PAUSA
+
+    ret
+
+
+; ============================================================
+; ESPERA CORTA
+; ============================================================
+
+ESPERA_CORTA:
+
+    ldi CONT1, TIEMPO_CORTO
+
+EC1:
+
+    ldi CONT2, 200
+
+EC2:
+
+    dec CONT2
+    brne EC2
+
+    dec CONT1
+    brne EC1
+
+    ret
+
+
+; ============================================================
+; ESPERA MEDIA
+; ============================================================
+
+ESPERA_MEDIO:
+
+    ldi CONT1, TIEMPO_MEDIO
+
+EM1:
+
+    ldi CONT2, 200
+
+EM2:
+
+    dec CONT2
+    brne EM2
+
+    dec CONT1
+    brne EM1
+
+    ret
+
+
+; ============================================================
+; ESPERA LARGA
+; ============================================================
+
+ESPERA_LARGO:
+
+    ldi CONT1, TIEMPO_LARGO
+
+EL1:
+
+    ldi CONT2, 200
+
+EL2:
+
+    dec CONT2
+    brne EL2
+
+    dec CONT1
+    brne EL1
+
+    ret
+
+
+; ============================================================
+; ESPERA ESPECIAL PARA POSICION INICIAL
+; ============================================================
+
+ESPERA_CENTRO:
+
+    ldi CONT1, TIEMPO_CENTRO
+
+ECEN1:
+
+    ldi CONT2, 200
+
+ECEN2:
+
+    dec CONT2
+    brne ECEN2
+
+    dec CONT1
+    brne ECEN1
+
+    ret
+
+
+; ============================================================
+; PAUSA
+; ============================================================
+
+ESPERA_PAUSA:
+
+    ldi CONT1, 5
+
+EP1:
+
+    ldi CONT2, 200
+
+EP2:
+
+    dec CONT2
+    brne EP2
+
+    dec CONT1
+    brne EP1
+
+    ret
+
+
+; ============================================================
+; ESPERA PARA BAJAR HERRAMIENTA
+; ============================================================
+
+ESPERA_BAJAR:
+
+    ldi CONT1, 5
+
+EB1:
+
+    ldi CONT2, 200
+
+EB2:
+
+    dec CONT2
+    brne EB2
+
+    dec CONT1
+    brne EB1
+
+    ret
+
+
+; ============================================================
+; ESPERA PARA SUBIR HERRAMIENTA
+; ============================================================
+
+ESPERA_SUBIR:
+
+    ldi CONT1, 5
+
+ES1:
+
+    ldi CONT2, 200
+
+ES2:
+
+    dec CONT2
+    brne ES2
+
+    dec CONT1
+    brne ES1
+
+    ret
